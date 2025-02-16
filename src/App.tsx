@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { Upload, AlertCircle, Brain, Heart, Settings as Lungs, Activity, FileWarning } from 'lucide-react';
+import { Upload, AlertCircle, Brain, Heart, Stethoscope, Activity, FileWarning, Phone, Globe } from 'lucide-react';
 
 interface AnalysisResult {
   organName: string;
@@ -11,7 +11,7 @@ interface AnalysisResult {
   }[];
 }
 
-function App() {
+export default function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -63,6 +63,26 @@ function App() {
           <div className="flex items-center space-x-2">
             <Brain className="w-8 h-8 text-blue-600" />
             <h1 className="text-2xl font-bold text-gray-900">Medical Image Analysis</h1>
+          </div>
+          <div className="flex items-center space-x-4">
+            <a
+              href="https://likelook.wixsite.com/solutions"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center space-x-1 text-gray-600 hover:text-blue-600"
+            >
+              <Globe className="w-5 h-5" />
+              <span className="hidden sm:inline">Like Look Solutions</span>
+            </a>
+            <a
+              href="https://wa.me/5511970603441"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center space-x-1 text-gray-600 hover:text-green-600"
+            >
+              <Phone className="w-5 h-5" />
+              <span className="hidden sm:inline">Contact Us</span>
+            </a>
           </div>
         </div>
       </header>
@@ -151,7 +171,7 @@ function App() {
                       ) : result.organName === 'Heart' ? (
                         <Heart className="w-5 h-5 text-red-600" />
                       ) : (
-                        <Lungs className="w-5 h-5 text-green-600" />
+                        <Stethoscope className="w-5 h-5 text-green-600" />
                       )}
                       <h3 className="font-medium">{result.organName}</h3>
                       <span className="text-sm text-gray-500">
@@ -200,8 +220,25 @@ function App() {
           </div>
         </div>
       </main>
+
+      {/* Footer */}
+      <footer className="bg-white border-t mt-8">
+        <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+          <div className="text-center text-gray-600 text-sm">
+            <p>© 2024 Like Look Solutions. Developed by Julio Campos Machado</p>
+            <p className="mt-1">
+              <a
+                href="https://wa.me/5511970603441"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 hover:text-blue-800"
+              >
+                Contact: +55 11 97060-3441
+              </a>
+            </p>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
-
-export default App;
