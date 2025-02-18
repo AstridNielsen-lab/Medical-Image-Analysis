@@ -1,21 +1,15 @@
 import React, { useState, useCallback } from 'react';
-import { Upload, AlertCircle, Brain, Heart, Stethoscope, Activity, FileWarning, Phone, Globe } from 'lucide-react';
+import { Upload, AlertCircle, Brain, Heart, Settings as Lungs, Activity, FileWarning, Phone, Globe } from 'lucide-react';
+import { ImageAnalyzer } from './utils/imageAnalysis';
+import { MedicalAnalysisResult } from './types/analysis';
 
-interface AnalysisResult {
-  organName: string;
-  confidence: number;
-  anomalies: {
-    type: string;
-    severity: 'low' | 'medium' | 'high';
-    description: string;
-  }[];
-}
+const imageAnalyzer = new ImageAnalyzer();
 
 export default function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [results, setResults] = useState<AnalysisResult[]>([]);
+  const [results, setResults] = useState<MedicalAnalysisResult | null>(null);
 
   const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -29,31 +23,19 @@ export default function App() {
     }
   }, []);
 
-  const handleAnalyze = useCallback(() => {
+  const handleAnalyze = useCallback(async () => {
+    if (!selectedFile) return;
+    
     setIsAnalyzing(true);
-    // Simulate analysis - in a real app, this would call a backend service
-    setTimeout(() => {
-      setResults([
-        {
-          organName: 'Brain',
-          confidence: 98.5,
-          anomalies: [
-            {
-              type: 'Aneurysm',
-              severity: 'medium',
-              description: 'Detected potential aneurysm in anterior cerebral artery'
-            }
-          ]
-        },
-        {
-          organName: 'Blood Vessels',
-          confidence: 95.2,
-          anomalies: []
-        }
-      ]);
+    try {
+      const analysisResults = await imageAnalyzer.analyzeImage(selectedFile);
+      setResults(analysisResults);
+    } catch (error) {
+      console.error('Analysis failed:', error);
+    } finally {
       setIsAnalyzing(false);
-    }, 2000);
-  }, []);
+    }
+  }, [selectedFile]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -87,6 +69,32 @@ export default function App() {
         </div>
       </header>
 
+      {/* Usage Instructions */}
+      <div className="bg-blue-50 border-b border-blue-100">
+        <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+          <div className="grid md:grid-cols-2 gap-8">
+            <div>
+              <h2 className="text-lg font-semibold text-blue-900 mb-3">Como Usar</h2>
+              <ol className="space-y-2 text-blue-800">
+                <li>1. Faça upload de uma imagem de tomografia</li>
+                <li>2. Clique no botão "Analyze Image" para iniciar a análise</li>
+                <li>3. Aguarde o processamento da imagem</li>
+                <li>4. Visualize os resultados detalhados da análise</li>
+              </ol>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-blue-900 mb-3">Arquivos Aceitos</h2>
+              <ul className="space-y-2 text-blue-800">
+                <li>• Imagens de Tomografia (CT Scan)</li>
+                <li>• Formatos: PNG, JPG, JPEG</li>
+                <li>• Tamanho máximo: 10MB</li>
+                <li>• Resolução recomendada: 512x512 pixels ou maior</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <main className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Upload Section */}
@@ -110,7 +118,7 @@ export default function App() {
                     />
                   </label>
                   <p className="mt-1 text-xs text-gray-500">
-                    PNG, JPG, DICOM up to 10MB
+                    PNG, JPG up to 10MB
                   </p>
                 </div>
               </div>
@@ -125,7 +133,7 @@ export default function App() {
                   onClick={() => {
                     setPreviewUrl(null);
                     setSelectedFile(null);
-                    setResults([]);
+                    setResults(null);
                   }}
                   className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full hover:bg-red-600"
                 >
@@ -134,7 +142,7 @@ export default function App() {
               </div>
             )}
 
-            {previewUrl && !isAnalyzing && results.length === 0 && (
+            {previewUrl && !isAnalyzing && !results && (
               <button
                 onClick={handleAnalyze}
                 className="mt-4 w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 flex items-center justify-center space-x-2"
@@ -156,65 +164,74 @@ export default function App() {
           <div className="bg-white rounded-lg shadow-sm p-6">
             <h2 className="text-lg font-semibold mb-4">Analysis Results</h2>
             
-            {results.length === 0 ? (
+            {!results ? (
               <div className="text-center text-gray-500 py-12">
                 <FileWarning className="mx-auto h-12 w-12" />
                 <p className="mt-2">No analysis results yet</p>
               </div>
             ) : (
               <div className="space-y-6">
-                {results.map((result, index) => (
-                  <div key={index} className="border rounded-lg p-4">
-                    <div className="flex items-center space-x-2 mb-2">
-                      {result.organName === 'Brain' ? (
-                        <Brain className="w-5 h-5 text-blue-600" />
-                      ) : result.organName === 'Heart' ? (
-                        <Heart className="w-5 h-5 text-red-600" />
-                      ) : (
-                        <Stethoscope className="w-5 h-5 text-green-600" />
-                      )}
-                      <h3 className="font-medium">{result.organName}</h3>
-                      <span className="text-sm text-gray-500">
-                        ({result.confidence.toFixed(1)}% confidence)
-                      </span>
-                    </div>
+                <div className="border rounded-lg p-4 bg-gray-50">
+                  <h3 className="font-medium text-lg mb-2">Diagnosis Summary</h3>
+                  <p className={`text-lg font-medium ${
+                    results.abnormalityLevel === 'high' 
+                      ? 'text-red-600' 
+                      : results.abnormalityLevel === 'medium'
+                      ? 'text-yellow-600'
+                      : 'text-green-600'
+                  }`}>
+                    {results.diagnosis}
+                  </p>
+                </div>
 
-                    {result.anomalies.length > 0 ? (
-                      <div className="mt-2 space-y-2">
-                        {result.anomalies.map((anomaly, idx) => (
-                          <div
-                            key={idx}
-                            className={`flex items-start space-x-2 p-2 rounded-lg ${
-                              anomaly.severity === 'high'
-                                ? 'bg-red-50'
-                                : anomaly.severity === 'medium'
-                                ? 'bg-yellow-50'
-                                : 'bg-green-50'
-                            }`}
-                          >
-                            <AlertCircle className={`w-5 h-5 flex-shrink-0 ${
-                              anomaly.severity === 'high'
-                                ? 'text-red-500'
-                                : anomaly.severity === 'medium'
-                                ? 'text-yellow-500'
-                                : 'text-green-500'
-                            }`} />
-                            <div>
-                              <p className="font-medium">{anomaly.type}</p>
-                              <p className="text-sm text-gray-600">
-                                {anomaly.description}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-gray-600 mt-2">
-                        No anomalies detected
-                      </p>
-                    )}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="border rounded-lg p-4">
+                    <h4 className="font-medium mb-2">Statistics</h4>
+                    <ul className="space-y-2">
+                      <li>Total Cells: {results.statistics.totalCells}</li>
+                      <li>Abnormal Cells: {results.statistics.abnormalCells}</li>
+                      <li>Abnormality: {results.statistics.abnormalityPercentage.toFixed(1)}%</li>
+                    </ul>
                   </div>
-                ))}
+
+                  <div className="border rounded-lg p-4">
+                    <h4 className="font-medium mb-2">Analysis Time</h4>
+                    <p>{(results.executionTime / 1000).toFixed(2)} seconds</p>
+                  </div>
+                </div>
+
+                <div className="border rounded-lg p-4">
+                  <h4 className="font-medium mb-2">Detected Cells</h4>
+                  <div className="max-h-60 overflow-y-auto">
+                    {results.cells.map((cell) => (
+                      <div key={cell.id} className="border-b py-2 last:border-b-0">
+                        <div className="flex justify-between items-start">
+                          <span className="font-medium">Cell {cell.id}</span>
+                          {cell.abnormalities.length > 0 && (
+                            <span className="text-red-500 text-sm">
+                              {cell.abnormalities.join(', ')}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          Size: {cell.size.toFixed(0)} px² | 
+                          Shape Complexity: {(cell.shape * 100).toFixed(1)}%
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {results.processedImageUrl && (
+                  <div className="border rounded-lg p-4">
+                    <h4 className="font-medium mb-2">Processed Image</h4>
+                    <img
+                      src={results.processedImageUrl}
+                      alt="Processed"
+                      className="w-full h-auto rounded-lg"
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>
