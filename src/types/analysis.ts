@@ -1,22 +1,27 @@
 export type DiagnosisLevel = 'low' | 'medium' | 'high';
 
-export interface CellData {
+export interface AnomalyData {
   id: number;
+  type: 'aneurysm' | 'mass' | 'calcification' | 'fluid' | 'other';
+  location: string;
   size: number;
-  shape: number;
-  colorDifference: number;
-  abnormalities: string[];
+  density: number;
+  hounsfield: number; // Hounsfield units for CT density
+  irregularity: number;
+  characteristics: string[];
 }
 
 export interface AnalysisStatistics {
-  totalCells: number;
-  abnormalCells: number;
-  abnormalityPercentage: number;
+  totalAnomalies: number;
+  averageDensity: number;
   averageSize: number;
+  maxHounsfield: number;
+  minHounsfield: number;
+  criticalLocations: number;
 }
 
 export interface MedicalAnalysisResult {
-  cells: CellData[];
+  anomalies: AnomalyData[];
   statistics: AnalysisStatistics;
   executionTime: number;
   abnormalityLevel: DiagnosisLevel;

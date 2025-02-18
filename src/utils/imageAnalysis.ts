@@ -1,9 +1,19 @@
-import { MedicalAnalysisResult, CellData, DiagnosisLevel } from '../types/analysis';
+import { MedicalAnalysisResult, AnomalyData, DiagnosisLevel } from '../types/analysis';
 
 export class ImageAnalyzer {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private startTime: Date;
+
+  // Hounsfield unit ranges for different tissues
+  private readonly HU_RANGES = {
+    air: [-1000, -900],
+    fat: [-120, -90],
+    water: [-4, 4],
+    softTissue: [20, 40],
+    bone: [400, 1000],
+    contrast: [100, 300]
+  };
 
   constructor() {
     this.canvas = document.createElement('canvas');
@@ -13,39 +23,40 @@ export class ImageAnalyzer {
 
   async analyzeImage(imageFile: File): Promise<MedicalAnalysisResult> {
     this.startTime = new Date();
-    console.log("Starting analysis process...");
+    console.log("Starting tomography analysis...");
 
-    // Load image into canvas
     const image = await this.loadImage(imageFile);
     this.canvas.width = image.width;
     this.canvas.height = image.height;
     this.ctx.drawImage(image, 0, 0);
 
-    // Get image data
     const imageData = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
     const { data, width, height } = imageData;
 
-    // Convert to grayscale
-    const grayscaleData = this.convertToGrayscale(data);
+    // Preprocess the image
+    const preprocessedData = this.preprocessImage(data);
     
-    // Find contours (simplified version using threshold)
-    const contours = this.findContours(grayscaleData, width, height);
+    // Detect regions of interest
+    const regions = this.detectAnomalousRegions(preprocessedData, width, height);
     
-    // Analyze cells
-    const cellsData = this.analyzeCells(contours, grayscaleData, width);
+    // Analyze each region
+    const anomalyData = this.analyzeAnomalies(regions, preprocessedData, width);
     
     // Calculate statistics
-    const statistics = this.calculateStatistics(cellsData);
-    
+    const statistics = this.calculateStatistics(anomalyData);
+
+    // Draw annotations on the canvas
+    this.drawAnnotations(regions, anomalyData);
+
     const endTime = new Date();
     const executionTime = endTime.getTime() - this.startTime.getTime();
 
     return {
-      cells: cellsData,
+      anomalies: anomalyData,
       statistics,
       executionTime,
       abnormalityLevel: this.determineAbnormalityLevel(statistics),
-      diagnosis: this.generateDiagnosis(statistics),
+      diagnosis: this.generateDiagnosis(anomalyData, statistics),
       processedImageUrl: this.canvas.toDataURL()
     };
   }
@@ -63,93 +74,167 @@ export class ImageAnalyzer {
     });
   }
 
-  private convertToGrayscale(data: Uint8ClampedArray): Uint8ClampedArray {
-    const grayscale = new Uint8ClampedArray(data.length / 4);
+  private preprocessImage(data: Uint8ClampedArray): Float32Array {
+    const processed = new Float32Array(data.length / 4);
+    
+    // Convert to Hounsfield-like units and apply contrast enhancement
     for (let i = 0; i < data.length; i += 4) {
-      grayscale[i / 4] = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114);
+      const pixel = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114);
+      // Approximate HU conversion (this would need calibration in a real system)
+      const hu = this.pixelToHU(pixel);
+      processed[i / 4] = hu;
     }
-    return grayscale;
+
+    return processed;
   }
 
-  private findContours(
-    grayscaleData: Uint8ClampedArray,
+  private pixelToHU(pixel: number): number {
+    // Simplified conversion - in real CT machines this would be calibrated
+    return (pixel - 128) * 2;
+  }
+
+  private detectAnomalousRegions(
+    data: Float32Array,
     width: number,
     height: number
-  ): Array<{ x: number; y: number; width: number; height: number }> {
-    const threshold = 128;
-    const contours: Array<{ x: number; y: number; width: number; height: number }> = [];
-    
-    // Simplified contour detection using threshold
-    for (let y = 0; y < height - 1; y++) {
-      for (let x = 0; x < width - 1; x++) {
+  ): Array<{ x: number; y: number; width: number; height: number; type: string }> {
+    const regions: Array<{ x: number; y: number; width: number; height: number; type: string }> = [];
+    const visited = new Set<number>();
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
         const idx = y * width + x;
-        if (grayscaleData[idx] > threshold) {
-          // Found a potential cell
-          let cellWidth = 1;
-          let cellHeight = 1;
-          
-          // Grow region
-          while (
-            x + cellWidth < width &&
-            grayscaleData[idx + cellWidth] > threshold
-          ) {
-            cellWidth++;
+        if (visited.has(idx)) continue;
+
+        const hu = data[idx];
+        if (this.isAnomalousHU(hu)) {
+          // Region growing
+          const region = this.growRegion(data, width, height, x, y, visited);
+          if (region) {
+            regions.push({
+              ...region,
+              type: this.classifyRegion(region, data, width)
+            });
           }
-          
-          while (
-            y + cellHeight < height &&
-            grayscaleData[idx + cellHeight * width] > threshold
-          ) {
-            cellHeight++;
-          }
-          
-          if (cellWidth > 5 && cellHeight > 5) { // Minimum size threshold
-            contours.push({ x, y, width: cellWidth, height: cellHeight });
-          }
-          
-          x += cellWidth; // Skip processed pixels
         }
       }
     }
-    
-    return contours;
+
+    return regions;
   }
 
-  private analyzeCells(
-    contours: Array<{ x: number; y: number; width: number; height: number }>,
-    grayscaleData: Uint8ClampedArray,
+  private isAnomalousHU(hu: number): boolean {
+    // Check if HU value is outside normal tissue ranges
+    return (hu > this.HU_RANGES.softTissue[1] && hu < this.HU_RANGES.bone[0]) ||
+           (hu > this.HU_RANGES.contrast[1]);
+  }
+
+  private growRegion(
+    data: Float32Array,
+    width: number,
+    height: number,
+    startX: number,
+    startY: number,
+    visited: Set<number>
+  ) {
+    const queue: [number, number][] = [[startX, startY]];
+    const region = {
+      x: startX,
+      y: startY,
+      width: 1,
+      height: 1
+    };
+
+    while (queue.length > 0) {
+      const [x, y] = queue.shift()!;
+      const idx = y * width + x;
+      
+      if (visited.has(idx)) continue;
+      visited.add(idx);
+
+      // Update region bounds
+      region.x = Math.min(region.x, x);
+      region.y = Math.min(region.y, y);
+      region.width = Math.max(region.width, x - region.x + 1);
+      region.height = Math.max(region.height, y - region.y + 1);
+
+      // Check neighbors
+      const neighbors = [
+        [x + 1, y], [x - 1, y],
+        [x, y + 1], [x, y - 1]
+      ];
+
+      for (const [nx, ny] of neighbors) {
+        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+          const nIdx = ny * width + nx;
+          if (!visited.has(nIdx) && this.isAnomalousHU(data[nIdx])) {
+            queue.push([nx, ny]);
+          }
+        }
+      }
+    }
+
+    return region;
+  }
+
+  private classifyRegion(
+    region: { x: number; y: number; width: number; height: number },
+    data: Float32Array,
     width: number
-  ): CellData[] {
-    return contours.map((contour, index) => {
-      const area = contour.width * contour.height;
-      const perimeter = 2 * (contour.width + contour.height);
-      const colorDifference = this.calculateColorDifference(
-        contour,
-        grayscaleData,
-        width
-      );
+  ): string {
+    let sumHU = 0;
+    let count = 0;
+
+    for (let y = region.y; y < region.y + region.height; y++) {
+      for (let x = region.x; x < region.x + region.width; x++) {
+        const hu = data[y * width + x];
+        sumHU += hu;
+        count++;
+      }
+    }
+
+    const avgHU = sumHU / count;
+
+    if (avgHU > this.HU_RANGES.contrast[0]) return 'aneurysm';
+    if (avgHU > this.HU_RANGES.bone[0]) return 'calcification';
+    if (avgHU < this.HU_RANGES.water[0]) return 'fluid';
+    return 'mass';
+  }
+
+  private analyzeAnomalies(
+    regions: Array<{ x: number; y: number; width: number; height: number; type: string }>,
+    data: Float32Array,
+    width: number
+  ): AnomalyData[] {
+    return regions.map((region, index) => {
+      const size = region.width * region.height;
+      const density = this.calculateRegionDensity(region, data, width);
+      const irregularity = this.calculateIrregularity(region);
 
       return {
         id: index + 1,
-        size: area,
-        shape: this.calculateShapeComplexity(contour),
-        colorDifference,
-        abnormalities: this.detectAbnormalities(area, colorDifference)
+        type: region.type as AnomalyData['type'],
+        location: this.determineLocation(region),
+        size,
+        density,
+        hounsfield: this.calculateAverageHU(region, data, width),
+        irregularity,
+        characteristics: this.determineCharacteristics(region, density, irregularity)
       };
     });
   }
 
-  private calculateColorDifference(
-    contour: { x: number; y: number; width: number; height: number },
-    grayscaleData: Uint8ClampedArray,
+  private calculateRegionDensity(
+    region: { x: number; y: number; width: number; height: number },
+    data: Float32Array,
     width: number
   ): number {
     let sum = 0;
     let count = 0;
 
-    for (let y = contour.y; y < contour.y + contour.height; y++) {
-      for (let x = contour.x; x < contour.x + contour.width; x++) {
-        sum += grayscaleData[y * width + x];
+    for (let y = region.y; y < region.y + region.height; y++) {
+      for (let x = region.x; x < region.x + region.width; x++) {
+        sum += data[y * width + x];
         count++;
       }
     }
@@ -157,52 +242,128 @@ export class ImageAnalyzer {
     return count > 0 ? sum / count : 0;
   }
 
-  private calculateShapeComplexity(
-    contour: { width: number; height: number }
+  private calculateAverageHU(
+    region: { x: number; y: number; width: number; height: number },
+    data: Float32Array,
+    width: number
   ): number {
-    return Math.abs(contour.width - contour.height) / Math.max(contour.width, contour.height);
+    return this.calculateRegionDensity(region, data, width);
   }
 
-  private detectAbnormalities(area: number, colorDifference: number): string[] {
-    const abnormalities: string[] = [];
-    
-    if (area > 1000) abnormalities.push('hipertrofia');
-    if (area < 100) abnormalities.push('hipotrofia');
-    if (colorDifference > 200) abnormalities.push('acúmulos intracelulares');
-    
-    return abnormalities;
+  private calculateIrregularity(
+    region: { width: number; height: number }
+  ): number {
+    return Math.abs(1 - region.width / region.height);
   }
 
-  private calculateStatistics(cells: CellData[]) {
-    const totalCells = cells.length;
-    const abnormalCells = cells.filter(cell => cell.abnormalities.length > 0).length;
-    const averageSize = cells.reduce((sum, cell) => sum + cell.size, 0) / totalCells;
+  private determineLocation(
+    region: { x: number; y: number }
+  ): string {
+    // Simplified location determination - would need proper anatomical mapping
+    const x = region.x;
+    const y = region.y;
+    
+    if (y < this.canvas.height / 3) return 'superior';
+    if (y > (this.canvas.height * 2) / 3) return 'inferior';
+    return 'central';
+  }
 
+  private determineCharacteristics(
+    region: { width: number; height: number },
+    density: number,
+    irregularity: number
+  ): string[] {
+    const characteristics: string[] = [];
+
+    if (irregularity > 0.3) characteristics.push('irregular');
+    if (region.width * region.height > 1000) characteristics.push('large');
+    if (density > 100) characteristics.push('dense');
+
+    return characteristics;
+  }
+
+  private calculateStatistics(anomalies: AnomalyData[]) {
+    const totalAnomalies = anomalies.length;
+    const densities = anomalies.map(a => a.density);
+    const sizes = anomalies.map(a => a.size);
+    const hounsfields = anomalies.map(a => a.hounsfield);
+    
     return {
-      totalCells,
-      abnormalCells,
-      abnormalityPercentage: (abnormalCells / totalCells) * 100,
-      averageSize
+      totalAnomalies,
+      averageDensity: densities.reduce((a, b) => a + b, 0) / totalAnomalies,
+      averageSize: sizes.reduce((a, b) => a + b, 0) / totalAnomalies,
+      maxHounsfield: Math.max(...hounsfields),
+      minHounsfield: Math.min(...hounsfields),
+      criticalLocations: anomalies.filter(a => 
+        a.type === 'aneurysm' || 
+        (a.size > 1000 && a.location === 'central')
+      ).length
     };
   }
 
   private determineAbnormalityLevel(statistics: {
-    abnormalityPercentage: number;
+    totalAnomalies: number;
+    criticalLocations: number;
   }): DiagnosisLevel {
-    if (statistics.abnormalityPercentage > 30) return 'high';
-    if (statistics.abnormalityPercentage > 10) return 'medium';
+    if (statistics.criticalLocations > 0) return 'high';
+    if (statistics.totalAnomalies > 3) return 'medium';
     return 'low';
   }
 
-  private generateDiagnosis(statistics: {
-    abnormalityPercentage: number;
-  }): string {
-    if (statistics.abnormalityPercentage > 30) {
-      return 'Anomalia Grave Detectada - Recomenda-se avaliação médica imediata';
+  private generateDiagnosis(
+    anomalies: AnomalyData[],
+    statistics: { criticalLocations: number }
+  ): string {
+    if (statistics.criticalLocations > 0) {
+      const criticalAnomalies = anomalies.filter(a => 
+        a.type === 'aneurysm' || 
+        (a.size > 1000 && a.location === 'central')
+      );
+      
+      const descriptions = criticalAnomalies.map(a => 
+        `${a.type} ${a.location} (${a.characteristics.join(', ')})`
+      );
+      
+      return `Anomalia Crítica Detectada - ${descriptions.join('; ')} - Recomenda-se avaliação médica imediata`;
     }
-    if (statistics.abnormalityPercentage > 10) {
-      return 'Anomalia Moderada Detectada - Recomenda-se acompanhamento médico';
+
+    if (anomalies.length > 0) {
+      return `Anomalias Detectadas - ${anomalies.length} regiões identificadas - Recomenda-se acompanhamento médico`;
     }
+
     return 'Nenhuma anomalia significativa detectada';
+  }
+
+  private drawAnnotations(
+    regions: Array<{ x: number; y: number; width: number; height: number; type: string }>,
+    anomalies: AnomalyData[]
+  ) {
+    regions.forEach((region, index) => {
+      const anomaly = anomalies[index];
+      
+      // Draw region outline
+      this.ctx.strokeStyle = this.getColorForType(anomaly.type);
+      this.ctx.lineWidth = 2;
+      this.ctx.strokeRect(region.x, region.y, region.width, region.height);
+      
+      // Add label
+      this.ctx.fillStyle = this.getColorForType(anomaly.type);
+      this.ctx.font = '12px Arial';
+      this.ctx.fillText(
+        `${anomaly.type} (${anomaly.characteristics.join(', ')})`,
+        region.x,
+        region.y - 5
+      );
+    });
+  }
+
+  private getColorForType(type: string): string {
+    switch (type) {
+      case 'aneurysm': return '#ff0000';
+      case 'mass': return '#ff9900';
+      case 'calcification': return '#00ff00';
+      case 'fluid': return '#0000ff';
+      default: return '#purple';
+    }
   }
 }
