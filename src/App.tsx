@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { Upload, AlertCircle, Brain, Heart, Settings as Lungs, Activity, FileWarning, Phone, Globe } from 'lucide-react';
+import { Upload, Brain, Phone, Globe } from 'lucide-react';
 import { ImageAnalyzer } from './utils/imageAnalysis';
 import { MedicalAnalysisResult } from './types/analysis';
 
@@ -147,7 +147,7 @@ export default function App() {
                 onClick={handleAnalyze}
                 className="mt-4 w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 flex items-center justify-center space-x-2"
               >
-                <Activity className="w-5 h-5" />
+                <Upload className="w-5 h-5" />
                 <span>Analyze Image</span>
               </button>
             )}
@@ -166,11 +166,12 @@ export default function App() {
             
             {!results ? (
               <div className="text-center text-gray-500 py-12">
-                <FileWarning className="mx-auto h-12 w-12" />
+                <Upload className="mx-auto h-12 w-12" />
                 <p className="mt-2">No analysis results yet</p>
               </div>
             ) : (
               <div className="space-y-6">
+                {/* Diagnosis Summary */}
                 <div className="border rounded-lg p-4 bg-gray-50">
                   <h3 className="font-medium text-lg mb-2">Diagnosis Summary</h3>
                   <p className={`text-lg font-medium ${
@@ -184,13 +185,14 @@ export default function App() {
                   </p>
                 </div>
 
+                {/* Statistics */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="border rounded-lg p-4">
                     <h4 className="font-medium mb-2">Statistics</h4>
                     <ul className="space-y-2">
-                      <li>Total Cells: {results.statistics.totalCells}</li>
-                      <li>Abnormal Cells: {results.statistics.abnormalCells}</li>
-                      <li>Abnormality: {results.statistics.abnormalityPercentage.toFixed(1)}%</li>
+                      <li>Total Anomalies: {results.statistics.totalAnomalies}</li>
+                      <li>Average Density: {results.statistics.averageDensity.toFixed(1)} HU</li>
+                      <li>Critical Locations: {results.statistics.criticalLocations}</li>
                     </ul>
                   </div>
 
@@ -200,28 +202,31 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Detected Anomalies */}
                 <div className="border rounded-lg p-4">
-                  <h4 className="font-medium mb-2">Detected Cells</h4>
+                  <h4 className="font-medium mb-2">Detected Anomalies</h4>
                   <div className="max-h-60 overflow-y-auto">
-                    {results.cells.map((cell) => (
-                      <div key={cell.id} className="border-b py-2 last:border-b-0">
+                    {results.anomalies.map((anomaly) => (
+                      <div key={anomaly.id} className="border-b py-2 last:border-b-0">
                         <div className="flex justify-between items-start">
-                          <span className="font-medium">Cell {cell.id}</span>
-                          {cell.abnormalities.length > 0 && (
-                            <span className="text-red-500 text-sm">
-                              {cell.abnormalities.join(', ')}
-                            </span>
-                          )}
+                          <span className="font-medium">
+                            {anomaly.type.charAt(0).toUpperCase() + anomaly.type.slice(1)}
+                          </span>
+                          <span className="text-sm">
+                            Location: {anomaly.location}
+                          </span>
                         </div>
                         <div className="text-sm text-gray-600">
-                          Size: {cell.size.toFixed(0)} px² | 
-                          Shape Complexity: {(cell.shape * 100).toFixed(1)}%
+                          Size: {anomaly.size.toFixed(0)} px² | 
+                          Density: {anomaly.hounsfield.toFixed(0)} HU |
+                          Characteristics: {anomaly.characteristics.join(', ')}
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
 
+                {/* Processed Image */}
                 {results.processedImageUrl && (
                   <div className="border rounded-lg p-4">
                     <h4 className="font-medium mb-2">Processed Image</h4>
